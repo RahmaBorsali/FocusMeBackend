@@ -3,10 +3,15 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
-const authRoutes = require("./routes/auth.routes");
+const authRoutes    = require("./routes/auth.routes");
 const errorMiddleware = require("./middleware/error");
-const usersRoutes = require("./routes/users.routes");
+const usersRoutes   = require("./routes/users.routes");
 const friendsRoutes = require("./routes/friends.routes");
+const tasksRoutes    = require("./routes/tasks");
+const statsRoutes    = require("./routes/stats");
+const feedRoutes     = require("./routes/feed");
+const sessionsRoutes = require("./routes/sessions");
+
 const app = express();
 
 app.use(helmet());
@@ -18,9 +23,13 @@ app.use("/auth", authLimiter, authRoutes);
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-app.use(errorMiddleware);
-app.use("/users", usersRoutes);
+app.use("/users",      usersRoutes);
+app.use("/friends",    friendsRoutes);
+app.use("/api/tasks",    tasksRoutes);
+app.use("/api/stats",    statsRoutes);
+app.use("/api/feed",     feedRoutes);
+app.use("/api/sessions", sessionsRoutes);
 
-app.use("/friends", friendsRoutes);
+app.use(errorMiddleware);
 
 module.exports = app;
