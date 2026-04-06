@@ -5,7 +5,6 @@ const { syncStatsForSession } = require("../services/statsSync");
 
 const router = express.Router();
 
-// POST /api/tasks — Créer une tâche
 router.post('/', async (req, res) => {
   try {
     const { title, userId, isDone, dueDate, sessionId, dayId } = req.body;
@@ -23,10 +22,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// US-T1 : Marquer une tâche comme terminée
-// PATCH /api/tasks/:taskId/complete
-// ─────────────────────────────────────────────────────────────────────────────
+
 router.patch("/:taskId/complete", async (req, res) => {
   try {
     const { taskId } = req.params;
@@ -45,7 +41,6 @@ router.patch("/:taskId/complete", async (req, res) => {
       return res.status(404).json({ error: "TASK_NOT_FOUND" });
     }
 
-    // sync to UserStats if userId exists
     if (task.userId) {
       const today = new Date().toISOString().slice(0, 10);
       syncStatsForSession({
@@ -65,11 +60,7 @@ router.patch("/:taskId/complete", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// US-T2 : Reporter une tâche non terminée
-// PATCH /api/tasks/:taskId/postpone
-// Body : { newDate: "2025-01-20" }
-// ─────────────────────────────────────────────────────────────────────────────
+
 router.patch("/:taskId/postpone", async (req, res) => {
   try {
     const { taskId } = req.params;
@@ -91,14 +82,12 @@ router.patch("/:taskId/postpone", async (req, res) => {
       return res.status(400).json({ error: "INVALID_DATE_FORMAT" });
     }
 
-    // Must not be in the past (compare against today at midnight UTC)
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
     if (parsed < today) {
       return res.status(400).json({ error: "DATE_IN_THE_PAST" });
     }
 
-    // Find task first to make sure it exists
     const task = await Task.findById(taskId);
     if (!task) {
       return res.status(404).json({ error: "TASK_NOT_FOUND" });

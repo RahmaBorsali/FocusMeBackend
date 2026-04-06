@@ -6,17 +6,12 @@ const User = require("../models/user");
 
 const router = express.Router();
 
-// Helper — returns "yyyy-MM-dd" string N days ago (UTC)
 function dateNDaysAgo(n) {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - n);
   return d.toISOString().slice(0, 10);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/feed/:userId?limit=20
-// Returns a social feed of friend activity from the last 7 days.
-// ─────────────────────────────────────────────────────────────────────────────
 router.get("/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -28,7 +23,6 @@ router.get("/:userId", async (req, res) => {
 
     const uid = new mongoose.Types.ObjectId(userId);
 
-    // 1 — Get friend IDs from Friendship collection
     const friendships = await Friendship.find({
       $or: [{ user1Id: uid }, { user2Id: uid }]
     }).lean();
@@ -41,8 +35,7 @@ router.get("/:userId", async (req, res) => {
 
     if (friendIds.length === 0) return res.json([]);
 
-    // 2 — Fetch UserStats for those friends over the last 7 days
-    //     Only keep meaningful stats (at least 30 min focus, 1 task, or 3-day streak)
+  
     const sevenDaysAgo = dateNDaysAgo(7);
 
     const stats = await UserStats.find({
@@ -59,14 +52,12 @@ router.get("/:userId", async (req, res) => {
 
     if (stats.length === 0) return res.json([]);
 
-    // 3 — Enrich with user info
     const uniqueUserIds = [...new Set(stats.map(s => s.userId.toString()))];
     const users = await User.find({ _id: { $in: uniqueUserIds } })
       .select("_id username avatarUrl")
       .lean();
     const userMap = new Map(users.map(u => [u._id.toString(), u]));
 
-    // 4 — Generate FeedItems  (one stat record can produce multiple items)
     const feedItems = [];
 
     for (const stat of stats) {
@@ -121,7 +112,6 @@ router.get("/:userId", async (req, res) => {
       }
     }
 
-    // 5 — Sort by timestamp descending and apply limit
     feedItems.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     const paginated = feedItems.slice(0, limit);
 

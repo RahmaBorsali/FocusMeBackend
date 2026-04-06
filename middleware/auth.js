@@ -1,15 +1,24 @@
 const jwt = require("jsonwebtoken");
 
-function requireAuth(req, res, next) {
-  const header = req.headers.authorization || "";
-  const [type, token] = header.split(" ");
+function extractBearerToken(header = "") {
+  const [type, token] = String(header).split(" ");
+  if (type !== "Bearer" || !token) return null;
+  return token;
+}
 
-  if (type !== "Bearer" || !token) {
+function verifyAccessToken(token) {
+  return jwt.verify(token, process.env.JWT_SECRET);
+}
+
+function requireAuth(req, res, next) {
+  const token = extractBearerToken(req.headers.authorization || "");
+
+  if (!token) {
     return res.status(401).json({ error: "UNAUTHORIZED" });
   }
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = verifyAccessToken(token);
     req.userId = payload.sub;
     next();
   } catch {
@@ -17,4 +26,8 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { requireAuth };
+module.exports = {
+  extractBearerToken,
+  verifyAccessToken,
+  requireAuth
+};

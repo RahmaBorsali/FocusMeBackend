@@ -273,3 +273,85 @@ Fil d'activité des amis (7 derniers jours).
 | 400 | Validation échouée (champ manquant, format invalide, date passée) |
 | 404 | Ressource introuvable |
 | 500 | Erreur serveur interne |
+---
+
+## 6. Challenges
+
+### Challenge object
+```json
+{
+  "id": "ObjectId",
+  "title": "String",
+  "description": "String",
+  "creatorId": "ObjectId",
+  "startDate": "YYYY-MM-DD",
+  "endDate": "YYYY-MM-DD",
+  "visibility": "public | private | friends",
+  "status": "upcoming | ongoing | finished",
+  "participantsCount": 4,
+  "maxParticipants": 20,
+  "goal": {
+    "type": "focus_minutes | sessions_count | tasks_completed",
+    "targetValue": 300,
+    "unit": "minutes | sessions | tasks"
+  },
+  "goalMinutes": 300,
+  "joinCode": "ABCDEFGH",
+  "myJoinRequestStatus": "pending | null",
+  "myJoinRequestId": "ObjectId | null",
+  "createdAt": "Date",
+  "updatedAt": "Date"
+}
+```
+
+### Join a challenge
+`POST /api/challenges/:id/join`
+
+Possible body:
+```json
+{
+  "joinCode": "ABCDEFGH"
+}
+```
+
+Responses:
+- Direct join:
+```json
+{ "ok": true }
+```
+- Friends challenge without code:
+```json
+{
+  "ok": true,
+  "status": "pending_approval",
+  "requestId": "ObjectId"
+}
+```
+
+### Incoming join requests
+`GET /api/challenges/requests/incoming`
+
+### Outgoing join requests
+`GET /api/challenges/requests/outgoing`
+
+### Requests for one challenge
+`GET /api/challenges/:id/requests`
+
+### Accept request
+`POST /api/challenges/:id/requests/:requestId/accept`
+
+### Reject request
+`POST /api/challenges/:id/requests/:requestId/reject`
+
+### Cancel my request
+`DELETE /api/challenges/:id/my-request`
+
+### Challenge overview
+`GET /api/challenges/:id/overview`
+
+For owners, overview includes:
+```json
+{
+  "pendingJoinRequestsCount": 3
+}
+```

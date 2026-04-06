@@ -6,23 +6,17 @@ const User = require("../models/user");
 
 const router = express.Router();
 
-// Helper — returns "yyyy-MM-dd" string N days ago (UTC)
 function dateNDaysAgo(n) {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - n);
   return d.toISOString().slice(0, 10);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// POST /api/stats/sync
-// Body: { userId, date, focusMinutes, sessionsCount, tasksCompleted, streak }
-// Upserts the daily UserStats record, accumulating values with $inc.
-// ─────────────────────────────────────────────────────────────────────────────
+
 router.post("/sync", async (req, res) => {
   try {
     const { userId, date, focusMinutes, sessionsCount, tasksCompleted, streak } = req.body;
 
-    // Validate required fields
     if (!userId || !mongoose.isValidObjectId(userId)) {
       return res.status(400).json({ error: "INVALID_USER_ID" });
     }
@@ -30,7 +24,6 @@ router.post("/sync", async (req, res) => {
       return res.status(400).json({ error: "INVALID_DATE_FORMAT — expected yyyy-MM-dd" });
     }
 
-    // Accumulate numeric fields; streak is always overwritten with the latest value
     const stat = await UserStats.findOneAndUpdate(
       { userId: new mongoose.Types.ObjectId(userId), date },
       {
@@ -54,10 +47,7 @@ router.post("/sync", async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /api/stats/friends/:userId
-// Returns a weekly leaderboard of the user's friends.
-// ─────────────────────────────────────────────────────────────────────────────
+
 router.get("/friends/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
@@ -68,7 +58,6 @@ router.get("/friends/:userId", async (req, res) => {
 
     const uid = new mongoose.Types.ObjectId(userId);
 
-    // 1 — Retrieve friend IDs from the Friendship collection
     const friendships = await Friendship.find({
       $or: [{ user1Id: uid }, { user2Id: uid }]
     }).lean();
@@ -79,10 +68,8 @@ router.get("/friends/:userId", async (req, res) => {
         : f.user1Id.toString()
     );
 
-    // 2 — Aggregate statistics for the last 7 days
     const sevenDaysAgo = dateNDaysAgo(7);
 
-    // 2a — Friends aggregation
     let friendsResult = [];
     if (friendIds.length > 0) {
       const friendsAgg = await UserStats.aggregate([
@@ -122,7 +109,6 @@ router.get("/friends/:userId", async (req, res) => {
       }));
     }
 
-    // 2b — Self aggregation
     const selfAgg = await UserStats.aggregate([
       {
         $match: {
@@ -159,7 +145,6 @@ router.get("/friends/:userId", async (req, res) => {
       isCurrentUser: true
     }));
 
-    // 3 — Merge, sort, and rank
     const merged = [...friendsResult, ...selfResult]
       .sort((a, b) => b.weeklyFocusMin - a.weeklyFocusMin)
       .map((item, index) => ({

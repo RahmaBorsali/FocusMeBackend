@@ -11,7 +11,7 @@ function normalizePair(a, b) {
   return a.toString() < b.toString() ? [a, b] : [b, a];
 }
 
-// 1) send request
+// send request
 router.post("/request", requireAuth, async (req, res, next) => {
   try {
     const toUserId = String(req.body.toUserId || "");
@@ -45,7 +45,7 @@ router.post("/request", requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 2) incoming requests
+//  incoming requests
 router.get("/requests/incoming", requireAuth, async (req, res, next) => {
   try {
     const reqs = await FriendRequest.find({ toUserId: req.userId, status: "pending" })
@@ -75,7 +75,7 @@ router.get("/requests/incoming", requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 3) outgoing requests
+//  outgoing requests
 router.get("/requests/outgoing", requireAuth, async (req, res, next) => {
   try {
     const reqs = await FriendRequest.find({ fromUserId: req.userId, status: "pending" })
@@ -104,7 +104,7 @@ router.get("/requests/outgoing", requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 4) accept
+//  accept
 router.post("/requests/:id/accept", requireAuth, async (req, res, next) => {
   try {
     const id = String(req.params.id);
@@ -123,7 +123,7 @@ router.post("/requests/:id/accept", requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 5) reject
+//  reject
 router.post("/requests/:id/reject", requireAuth, async (req, res, next) => {
   try {
     const id = String(req.params.id);
@@ -138,7 +138,7 @@ router.post("/requests/:id/reject", requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 6) list friends
+// list friends
 router.get("/", requireAuth, async (req, res, next) => {
   try {
     const friendships = await Friendship.find({
@@ -163,7 +163,7 @@ router.get("/", requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// 7) delete friend
+//  delete friend
 router.delete("/:friendUserId", requireAuth, async (req, res, next) => {
   try {
     const friendUserId = String(req.params.friendUserId);
