@@ -141,10 +141,15 @@ async function generateUniqueJoinCode() {
 }
 
 async function areFriends(a, b) {
-  const [u1, u2] = normalizePair(a, b);
-  const found = await Friendship.findOne({ user1Id: u1, user2Id: u2 }).lean();
+  const found = await Friendship.findOne({
+    $or: [
+      { user1Id: a, user2Id: b },
+      { user1Id: b, user2Id: a }
+    ]
+  }).lean();
   return !!found;
 }
+
 
 async function ensureChallengeExists(id) {
   if (!mongoose.isValidObjectId(id)) {
