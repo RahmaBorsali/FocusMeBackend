@@ -6,8 +6,10 @@ const ChallengeInviteSchema = new mongoose.Schema(
     fromUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     toUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     kind: { type: String, enum: ["invite", "join_request"], default: "invite", index: true },
+    requestType: { type: String, enum: ["join", "request_access"] },
     status: { type: String, enum: ["pending", "accepted", "rejected", "cancelled"], default: "pending" },
-    createdAt: { type: Date, default: Date.now }
+    createdAt: { type: Date, default: Date.now },
+    decisionAt: { type: Date, default: null }
   },
   { timestamps: false }
 );

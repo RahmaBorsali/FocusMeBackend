@@ -299,6 +299,7 @@ Fil d'activité des amis (7 derniers jours).
   "joinCode": "ABCDEFGH",
   "myJoinRequestStatus": "pending | null",
   "myJoinRequestId": "ObjectId | null",
+  "myJoinRequestType": "join | request_access | null",
   "createdAt": "Date",
   "updatedAt": "Date"
 }
@@ -310,21 +311,40 @@ Fil d'activité des amis (7 derniers jours).
 Possible body:
 ```json
 {
-  "joinCode": "ABCDEFGH"
+  "joinCode": "ABCDEFGH",
+  "requestAccess": false
 }
 ```
 
 Responses:
 - Direct join:
 ```json
-{ "ok": true }
+{ "ok": true, "joined": true, "membershipStatus": "joined" }
 ```
-- Friends challenge without code:
+- Approval required:
 ```json
 {
   "ok": true,
+  "joined": false,
   "status": "pending_approval",
-  "requestId": "ObjectId"
+  "membershipStatus": "pending_request",
+  "requestId": "ObjectId",
+  "requestType": "join | request_access"
+}
+```
+
+### Request access explicitly
+`POST /api/challenges/:id/request-access`
+
+Response:
+```json
+{
+  "ok": true,
+  "joined": false,
+  "status": "pending_approval",
+  "membershipStatus": "pending_request",
+  "requestId": "ObjectId",
+  "requestType": "request_access"
 }
 ```
 

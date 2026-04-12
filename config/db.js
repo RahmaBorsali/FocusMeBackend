@@ -4,7 +4,13 @@ const { runChallengeMigrations } = require("../services/challengeMigrations");
 async function connectDB(uri) {
   mongoose.set("strictQuery", true);
   await mongoose.connect(uri);
-  await runChallengeMigrations();
+  try {
+    await runChallengeMigrations();
+  } catch (error) {
+    console.warn(
+      `[challenge-migrations] startup warning: ${error && error.message ? error.message : "unknown_error"}`
+    );
+  }
   console.log("MongoDB connected");
 }
 

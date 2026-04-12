@@ -32,6 +32,14 @@ function normalizeJoinCode(code) {
   return String(code || "").trim().toUpperCase();
 }
 
+function isTruthyFlag(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["1", "true", "yes", "oui", "on"].includes(normalized);
+}
+
 function generateJoinCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
@@ -197,7 +205,7 @@ async function getPendingJoinRequest(challengeId, userId, ownerId) {
     kind: "join_request",
     status: "pending"
   })
-    .select("_id status")
+    .select("_id status requestType")
     .lean();
 }
 
@@ -210,10 +218,54 @@ async function getPendingJoinRequestMap(challengeIds, userId) {
     kind: "join_request",
     status: "pending"
   })
-    .select("_id challengeId status")
+    .select("_id challengeId status requestType")
     .lean();
 
   return new Map(requests.map((request) => [normalizeObjectId(request.challengeId), request]));
+}
+
+function getJoinRequestType(request) {
+  return request && request.requestType === "request_access" ? "request_access" : "join";
+}
+
+async function createOrRefreshJoinRequest({
+  challengeId,
+  fromUserId,
+  toUserId,
+  requestType = "join"
+}) {
+  return ChallengeInvite.findOneAndUpdate(
+    {
+      challengeId,
+      fromUserId,
+      toUserId,
+      kind: "join_request"
+    },
+    {
+      $set: {
+        status: "pending",
+        requestType,
+        createdAt: new Date(),
+        decisionAt: null
+      }
+    },
+    { upsert: true, new: true }
+  );
+}
+
+async function resolveChallengeInvites(filter, status) {
+  return ChallengeInvite.updateMany(
+    {
+      ...filter,
+      status: "pending"
+    },
+    {
+      $set: {
+        status,
+        decisionAt: new Date()
+      }
+    }
+  );
 }
 
 function serializeChallenge(challenge, options = {}) {
@@ -247,6 +299,7 @@ function serializeChallenge(challenge, options = {}) {
     membershipStatus: getMembershipStatus({ isOwner, isJoined, myJoinRequest }),
     myJoinRequestStatus: myJoinRequest ? myJoinRequest.status : null,
     myJoinRequestId: myJoinRequest ? myJoinRequest._id : null,
+    myJoinRequestType: myJoinRequest ? getJoinRequestType(myJoinRequest) : null,
     createdAt: challenge.createdAt,
     updatedAt: challenge.updatedAt
   };
@@ -601,8 +654,11 @@ router.get("/invitations/incoming", requireAuth, async (req, res) => {
 
         return {
           id: invite._id,
+          challengeId: invite.challengeId,
+          kind: invite.kind,
           status: invite.status,
           createdAt: invite.createdAt,
+          decisionAt: invite.decisionAt || null,
           fromUser: fromUser ? { id: fromUser._id, username: fromUser.username, avatarUrl: fromUser.avatarUrl || "" } : null,
           challenge: serializeChallenge(challenge, {
             today,
@@ -646,8 +702,11 @@ router.get("/invitations/outgoing", requireAuth, async (req, res) => {
 
         return {
           id: invite._id,
+          challengeId: invite.challengeId,
+          kind: invite.kind,
           status: invite.status,
           createdAt: invite.createdAt,
+          decisionAt: invite.decisionAt || null,
           toUser: toUser ? { id: toUser._id, username: toUser.username, avatarUrl: toUser.avatarUrl || "" } : null,
           challenge: serializeChallenge(challenge, {
             today,
@@ -721,8 +780,12 @@ router.get("/requests/incoming", requireAuth, async (req, res) => {
 
         return {
           id: request._id,
+          challengeId: request.challengeId,
+          kind: request.kind,
+          requestType: getJoinRequestType(request),
           status: request.status,
           createdAt: request.createdAt,
+          decisionAt: request.decisionAt || null,
           fromUser: fromUser ? { id: fromUser._id, username: fromUser.username, avatarUrl: fromUser.avatarUrl || "" } : null,
           challenge: serializeChallenge(challenge, {
             today,
@@ -766,8 +829,12 @@ router.get("/requests/outgoing", requireAuth, async (req, res) => {
 
         return {
           id: request._id,
+          challengeId: request.challengeId,
+          kind: request.kind,
+          requestType: getJoinRequestType(request),
           status: request.status,
           createdAt: request.createdAt,
+          decisionAt: request.decisionAt || null,
           owner: owner ? { id: owner._id, username: owner.username, avatarUrl: owner.avatarUrl || "" } : null,
           challenge: serializeChallenge(challenge, {
             today,
@@ -881,16 +948,26 @@ router.post("/:id/join", requireAuth, async (req, res) => {
       userId: req.userId
     }).lean();
     if (existingParticipant && existingParticipant.status === "active") {
-      await ChallengeInvite.updateMany(
-        {
-          challengeId: challenge._id,
-          fromUserId: req.userId,
-          toUserId: challenge.creatorId,
-          kind: "join_request",
-          status: "pending"
-        },
-        { $set: { status: "accepted" } }
-      );
+      await Promise.all([
+        resolveChallengeInvites(
+          {
+            challengeId: challenge._id,
+            fromUserId: req.userId,
+            toUserId: challenge.creatorId,
+            kind: "join_request"
+          },
+          "accepted"
+        ),
+        resolveChallengeInvites(
+          {
+            challengeId: challenge._id,
+            fromUserId: challenge.creatorId,
+            toUserId: req.userId,
+            kind: "invite"
+          },
+          "accepted"
+        )
+      ]);
       return res.json({
         ok: true,
         joined: true,
@@ -903,45 +980,30 @@ router.post("/:id/join", requireAuth, async (req, res) => {
     }
 
     const providedCode = normalizeJoinCode(req.body.joinCode);
+    const wantsAccessRequest = isTruthyFlag(req.body.requestAccess) || isTruthyFlag(req.body.askAccess);
     const hasValidJoinCode = JOIN_CODE_RE.test(providedCode) && providedCode === challenge.joinCode;
-    const joinRequestFilter = {
-      challengeId: challenge._id,
-      fromUserId: req.userId,
-      toUserId: challenge.creatorId,
-      kind: "join_request",
-      status: "pending"
-    };
+    const shouldCreateApprovalRequest = wantsAccessRequest || (challenge.visibility !== "public" && !hasValidJoinCode);
 
-    if (challenge.visibility === "private" && !hasValidJoinCode) {
-      return res.status(403).json({ error: "INVALID_CODE" });
-    }
-
-    if (challenge.visibility === "friends" && !hasValidJoinCode) {
-      const allowed = normalizeObjectId(challenge.creatorId) === req.userId || await areFriends(challenge.creatorId, req.userId);
+    if (shouldCreateApprovalRequest) {
+      const allowed = challenge.visibility !== "friends"
+        || normalizeObjectId(challenge.creatorId) === req.userId
+        || await areFriends(challenge.creatorId, req.userId);
       if (!allowed) return res.status(403).json({ error: "NOT_FRIEND" });
 
-      const joinRequest = await ChallengeInvite.findOneAndUpdate(
-        {
-          challengeId: challenge._id,
-          fromUserId: req.userId,
-          toUserId: challenge.creatorId,
-          kind: "join_request"
-        },
-        {
-          $set: {
-            status: "pending",
-            createdAt: new Date()
-          }
-        },
-        { upsert: true, new: true }
-      );
+      const joinRequest = await createOrRefreshJoinRequest({
+        challengeId: challenge._id,
+        fromUserId: req.userId,
+        toUserId: challenge.creatorId,
+        requestType: wantsAccessRequest ? "request_access" : "join"
+      });
 
       return res.status(202).json({
         ok: true,
         joined: false,
         status: "pending_approval",
         membershipStatus: "pending_request",
-        requestId: joinRequest._id
+        requestId: joinRequest._id,
+        requestType: getJoinRequestType(joinRequest)
       });
     }
 
@@ -950,12 +1012,86 @@ router.post("/:id/join", requireAuth, async (req, res) => {
       { $set: { status: "active", joinedAt: new Date() } },
       { upsert: true }
     );
-    await ChallengeInvite.updateMany(joinRequestFilter, { $set: { status: "accepted" } });
+    await Promise.all([
+      resolveChallengeInvites(
+        {
+          challengeId: challenge._id,
+          fromUserId: req.userId,
+          toUserId: challenge.creatorId,
+          kind: "join_request"
+        },
+        "accepted"
+      ),
+      resolveChallengeInvites(
+        {
+          challengeId: challenge._id,
+          fromUserId: challenge.creatorId,
+          toUserId: req.userId,
+          kind: "invite"
+        },
+        "accepted"
+      )
+    ]);
 
     return res.json({
       ok: true,
       joined: true,
       membershipStatus: "joined"
+    });
+  } catch {
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+});
+
+router.post("/:id/request-access", requireAuth, async (req, res) => {
+  try {
+    const lookup = await ensureChallengeExists(req.params.id);
+    if (lookup.error) return res.status(lookup.error.status).json(lookup.error.body);
+
+    const { challenge } = lookup;
+    if (normalizeObjectId(challenge.creatorId) === req.userId) {
+      return res.status(400).json({ error: "OWNER_CANNOT_REQUEST_ACCESS" });
+    }
+    if (getToday() > challenge.endDate) return res.status(400).json({ error: "CHALLENGE_ENDED" });
+
+    const [participantsCount, existingParticipant, allowed] = await Promise.all([
+      getParticipantCount(challenge._id),
+      ChallengeParticipant.findOne({
+        challengeId: challenge._id,
+        userId: req.userId,
+        status: "active"
+      }).lean(),
+      challenge.visibility === "friends"
+        ? areFriends(challenge.creatorId, req.userId)
+        : Promise.resolve(true)
+    ]);
+
+    if (!allowed) return res.status(403).json({ error: "NOT_FRIEND" });
+    if (existingParticipant) {
+      return res.json({
+        ok: true,
+        joined: true,
+        membershipStatus: "joined"
+      });
+    }
+    if (participantsCount >= (Number(challenge.maxParticipants) || 20)) {
+      return res.status(409).json({ error: "CHALLENGE_FULL" });
+    }
+
+    const joinRequest = await createOrRefreshJoinRequest({
+      challengeId: challenge._id,
+      fromUserId: req.userId,
+      toUserId: challenge.creatorId,
+      requestType: "request_access"
+    });
+
+    return res.status(202).json({
+      ok: true,
+      joined: false,
+      status: "pending_approval",
+      membershipStatus: "pending_request",
+      requestId: joinRequest._id,
+      requestType: getJoinRequestType(joinRequest)
     });
   } catch {
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
@@ -1263,7 +1399,7 @@ router.post("/:id/invite", requireAuth, async (req, res) => {
 
     const invite = await ChallengeInvite.findOneAndUpdate(
       { challengeId: challenge._id, fromUserId: req.userId, toUserId, kind: "invite" },
-      { $set: { status: "pending", createdAt: new Date() } },
+      { $set: { status: "pending", createdAt: new Date(), decisionAt: null } },
       { upsert: true, new: true }
     );
 
@@ -1300,7 +1436,10 @@ router.get("/:id/invitations", requireAuth, async (req, res) => {
         const user = userMap.get(normalizeObjectId(invite.toUserId));
         return {
           id: invite._id,
+          challengeId: invite.challengeId,
+          kind: invite.kind,
           toUserId: invite.toUserId,
+          decisionAt: invite.decisionAt || null,
           username: user ? user.username : "",
           avatarUrl: user ? user.avatarUrl || "" : "",
           createdAt: invite.createdAt
@@ -1339,7 +1478,11 @@ router.get("/:id/requests", requireAuth, async (req, res) => {
         const user = userMap.get(normalizeObjectId(request.fromUserId));
         return {
           id: request._id,
+          challengeId: request.challengeId,
+          kind: request.kind,
+          requestType: getJoinRequestType(request),
           fromUserId: request.fromUserId,
+          decisionAt: request.decisionAt || null,
           username: user ? user.username : "",
           avatarUrl: user ? user.avatarUrl || "" : "",
           createdAt: request.createdAt
@@ -1367,6 +1510,7 @@ router.delete("/:id/my-request", requireAuth, async (req, res) => {
 
     if (!request) return res.status(404).json({ error: "REQUEST_NOT_FOUND" });
     request.status = "cancelled";
+    request.decisionAt = new Date();
     await request.save();
 
     return res.json({ ok: true });
@@ -1406,21 +1550,21 @@ router.post("/:id/invitations/:invId/accept", requireAuth, async (req, res) => {
     }
 
     invite.status = "accepted";
+    invite.decisionAt = new Date();
     await invite.save();
     await ChallengeParticipant.updateOne(
       { challengeId: challenge._id, userId: req.userId },
       { $set: { status: "active", joinedAt: new Date() } },
       { upsert: true }
     );
-    await ChallengeInvite.updateMany(
+    await resolveChallengeInvites(
       {
         challengeId: challenge._id,
         fromUserId: req.userId,
         toUserId: challenge.creatorId,
-        kind: "join_request",
-        status: "pending"
+        kind: "join_request"
       },
-      { $set: { status: "accepted" } }
+      "accepted"
     );
 
     return res.json({ ok: true });
@@ -1452,6 +1596,7 @@ router.post("/:id/invitations/:invId/reject", requireAuth, async (req, res) => {
     }
 
     invite.status = "rejected";
+    invite.decisionAt = new Date();
     await invite.save();
     return res.json({ ok: true });
   } catch {
@@ -1494,11 +1639,21 @@ router.post("/:id/requests/:requestId/accept", requireAuth, async (req, res) => 
     }
 
     request.status = "accepted";
+    request.decisionAt = new Date();
     await request.save();
     await ChallengeParticipant.updateOne(
       { challengeId: challenge._id, userId: request.fromUserId },
       { $set: { status: "active", joinedAt: new Date() } },
       { upsert: true }
+    );
+    await resolveChallengeInvites(
+      {
+        challengeId: challenge._id,
+        fromUserId: challenge.creatorId,
+        toUserId: request.fromUserId,
+        kind: "invite"
+      },
+      "accepted"
     );
 
     return res.json({ ok: true });
@@ -1534,6 +1689,7 @@ router.post("/:id/requests/:requestId/reject", requireAuth, async (req, res) => 
     }
 
     request.status = "rejected";
+    request.decisionAt = new Date();
     await request.save();
     return res.json({ ok: true });
   } catch {

@@ -30,33 +30,29 @@ async function backfillChallengeFields() {
       { joinCode: null },
       { joinCode: "" }
     ]
-  });
+  }).lean();
 
   for (const challenge of challenges) {
-    let changed = false;
+    const updates = {};
 
     if (!challenge.goalType) {
-      challenge.goalType = "focus_minutes";
-      changed = true;
+      updates.goalType = "focus_minutes";
     }
 
     if (!challenge.maxParticipants) {
-      challenge.maxParticipants = 20;
-      changed = true;
+      updates.maxParticipants = 20;
     }
 
     if (typeof challenge.targetValue === "undefined") {
-      challenge.targetValue = Number(challenge.goalMinutes) || 0;
-      changed = true;
+      updates.targetValue = Number(challenge.goalMinutes) || 0;
     }
 
     if (!challenge.joinCode) {
-      challenge.joinCode = await generateUniqueJoinCode();
-      changed = true;
+      updates.joinCode = await generateUniqueJoinCode();
     }
 
-    if (changed) {
-      await challenge.save();
+    if (Object.keys(updates).length > 0) {
+      await Challenge.updateOne({ _id: challenge._id }, { $set: updates });
       updatedChallenges += 1;
     }
   }
@@ -73,18 +69,59 @@ async function backfillChallengeInviteKinds() {
   return result.modifiedCount || 0;
 }
 
+async function backfillChallengeInviteRequestTypes() {
+  const result = await ChallengeInvite.updateMany(
+    {
+      kind: "join_request",
+      $or: [
+        { requestType: { $exists: false } },
+        { requestType: null },
+        { requestType: "" }
+      ]
+    },
+    { $set: { requestType: "join" } }
+  );
+
+  return result.modifiedCount || 0;
+}
+
+async function runMigrationStep(label, runner) {
+  try {
+    return await runner();
+  } catch (error) {
+    console.warn(
+      `[challenge-migrations] ${label} skipped: ${error && error.message ? error.message : "unknown_error"}`
+    );
+    return 0;
+  }
+}
+
+async function syncModelIndexes(model, label) {
+  try {
+    await model.syncIndexes();
+    return true;
+  } catch (error) {
+    console.warn(
+      `[challenge-migrations] ${label} index sync skipped: ${error && error.message ? error.message : "unknown_error"}`
+    );
+    return false;
+  }
+}
+
 async function syncChallengeIndexes() {
-  await Challenge.syncIndexes();
-  await ChallengeInvite.syncIndexes();
+  const challengeSynced = await syncModelIndexes(Challenge, "Challenge");
+  const inviteSynced = await syncModelIndexes(ChallengeInvite, "ChallengeInvite");
+  return { challengeSynced, inviteSynced };
 }
 
 async function runChallengeMigrations() {
-  const updatedInvites = await backfillChallengeInviteKinds();
-  const updatedChallenges = await backfillChallengeFields();
-  await syncChallengeIndexes();
+  const updatedInvites = await runMigrationStep("invite kind backfill", backfillChallengeInviteKinds);
+  const updatedRequestTypes = await runMigrationStep("invite requestType backfill", backfillChallengeInviteRequestTypes);
+  const updatedChallenges = await runMigrationStep("challenge field backfill", backfillChallengeFields);
+  const syncSummary = await syncChallengeIndexes();
 
   console.log(
-    `[challenge-migrations] ready (invites:${updatedInvites}, challenges:${updatedChallenges})`
+    `[challenge-migrations] ready (invites:${updatedInvites}, requestTypes:${updatedRequestTypes}, challenges:${updatedChallenges}, challengeIndexes:${syncSummary.challengeSynced}, inviteIndexes:${syncSummary.inviteSynced})`
   );
 }
 
