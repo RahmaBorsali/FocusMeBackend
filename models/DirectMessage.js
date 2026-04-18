@@ -5,7 +5,13 @@ const DirectMessageSchema = new mongoose.Schema(
     conversationId: { type: mongoose.Schema.Types.ObjectId, ref: "DirectConversation", required: true, index: true },
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     recipientId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    text: { type: String, required: true, trim: true, maxlength: 1000 },
+    text: { type: String, trim: true, maxlength: 1000 },
+    attachment: {
+      url: { type: String },
+      type: { type: String },
+      fileName: { type: String },
+      fileSize: { type: Number }
+    },
     readAt: { type: Date, default: null }
   },
   { timestamps: { createdAt: true, updatedAt: false } }

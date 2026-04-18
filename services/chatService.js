@@ -51,7 +51,7 @@ function serializeUser(user) {
   if (!user) return null;
 
   return {
-    id: user._id,
+    id: normalizeObjectId(user._id),
     username: user.username,
     email: user.email,
     avatarType: user.avatarType,
@@ -59,17 +59,19 @@ function serializeUser(user) {
     avatarUrl: user.avatarUrl
   };
 }
-
 function serializeMessage(message, userMap) {
-  const sender = userMap.get(normalizeObjectId(message.senderId)) || null;
-  const recipient = userMap.get(normalizeObjectId(message.recipientId)) || null;
+  const senderId = normalizeObjectId(message.senderId);
+  const recipientId = normalizeObjectId(message.recipientId);
+  const sender = userMap.get(senderId) || null;
+  const recipient = userMap.get(recipientId) || null;
 
   return {
-    id: message._id,
-    conversationId: message.conversationId,
+    id: normalizeObjectId(message._id),
+    conversationId: normalizeObjectId(message.conversationId),
     sender: serializeUser(sender),
     recipient: serializeUser(recipient),
     text: message.text,
+    attachment: message.attachment,
     createdAt: message.createdAt,
     readAt: message.readAt
   };
@@ -150,32 +152,36 @@ async function buildConversationItems(conversations, viewerUserId) {
   const conversationIds = conversations.map((item) => item._id);
   const participantIds = conversations.flatMap((item) => item.participantIds || []);
 
-  const [users, unreadRows] = await Promise.all([
-    findUsersByIds(participantIds),
-    DirectMessage.aggregate([
-      {
-        $match: {
-          conversationId: { $in: conversationIds.map((id) => toObjectId(id, "INVALID_CONVERSATION")) },
-          recipientId: toObjectId(viewerId, "INVALID_USER"),
-          readAt: null
-        }
-      },
-      { $group: { _id: "$conversationId", count: { $sum: 1 } } }
-    ])
-  ]);
+    const [users, unreadRows] = await Promise.all([
+      findUsersByIds(participantIds),
+      DirectMessage.aggregate([
+        {
+          $match: {
+            conversationId: { $in: conversationIds.map((id) => toObjectId(id, "INVALID_CONVERSATION")) },
+            recipientId: toObjectId(viewerId, "INVALID_USER"),
+            readAt: null
+          }
+        },
+        { $group: { _id: "$conversationId", count: { $sum: 1 } } }
+      ])
+    ]).catch(err => {
+      console.error("[ChatService] buildConversationItems Aggregate Error:", err);
+      throw err;
+    });
 
   const userMap = new Map(users.map((user) => [normalizeObjectId(user._id), user]));
   const unreadMap = new Map(unreadRows.map((row) => [normalizeObjectId(row._id), row.count]));
 
   return conversations.map((conversation) => {
     const peerId = getConversationPeerId(conversation, viewerId);
+    const cid = normalizeObjectId(conversation._id);
     return {
-      id: conversation._id,
+      id: cid,
       peer: serializeUser(userMap.get(peerId) || null),
-      unreadCount: unreadMap.get(normalizeObjectId(conversation._id)) || 0,
+      unreadCount: unreadMap.get(cid) || 0,
       lastMessage: conversation.lastMessageAt ? {
         text: conversation.lastMessageText,
-        senderId: conversation.lastMessageSenderId,
+        senderId: normalizeObjectId(conversation.lastMessageSenderId),
         createdAt: conversation.lastMessageAt
       } : null,
       createdAt: conversation.createdAt,
@@ -201,7 +207,7 @@ async function listMessagesForConversation(conversationId, userId, { limit, befo
   await ensureConversationAccess(conversationId, userId);
 
   const safeLimit = Math.min(Math.max(parseInt(limit, 10) || DEFAULT_MESSAGE_LIMIT, 1), MAX_MESSAGE_LIMIT);
-  const query = { conversationId };
+  const query = { conversationId: toObjectId(conversationId, "INVALID_CONVERSATION") };
 
   if (before) {
     const beforeDate = new Date(before);
@@ -210,16 +216,21 @@ async function listMessagesForConversation(conversationId, userId, { limit, befo
     }
   }
 
-  const messages = await DirectMessage.find(query).sort({ createdAt: -1 }).limit(safeLimit).lean();
-  const users = await findUsersByIds(messages.flatMap((message) => [message.senderId, message.recipientId]));
-  const userMap = new Map(users.map((user) => [normalizeObjectId(user._id), user]));
+  try {
+    const messages = await DirectMessage.find(query).sort({ createdAt: -1 }).limit(safeLimit).lean();
+    const users = await findUsersByIds(messages.flatMap((message) => [message.senderId, message.recipientId]));
+    const userMap = new Map(users.map((user) => [normalizeObjectId(user._id), user]));
 
-  return messages.reverse().map((message) => serializeMessage(message, userMap));
+    return messages.reverse().map((message) => serializeMessage(message, userMap));
+  } catch (error) {
+    console.error("[ChatService] listMessagesForConversation error:", error);
+    throw error;
+  }
 }
 
-async function createDirectMessage({ senderId, targetUserId, conversationId, text }) {
+async function createDirectMessage({ senderId, targetUserId, conversationId, text, attachment }) {
   const trimmedText = clampMessageText(text);
-  if (!trimmedText) throw createChatError(400, "EMPTY_MESSAGE");
+  if (!trimmedText && !attachment) throw createChatError(400, "EMPTY_MESSAGE");
 
   let conversation = null;
   let resolvedTargetUserId = normalizeObjectId(targetUserId);
@@ -238,17 +249,18 @@ async function createDirectMessage({ senderId, targetUserId, conversationId, tex
     conversationId: conversation._id,
     senderId,
     recipientId: resolvedTargetUserId,
-    text: trimmedText
+    text: trimmedText || null,
+    attachment: attachment || null
   });
 
-  conversation.lastMessageText = trimmedText;
+  conversation.lastMessageText = trimmedText || (attachment ? "[Pièce jointe]" : "");
   conversation.lastMessageAt = message.createdAt;
   conversation.lastMessageSenderId = senderId;
   await conversation.save();
 
   return {
-    conversation,
-    message,
+    conversationId: normalizeObjectId(conversation._id),
+    messageId: normalizeObjectId(message._id),
     senderId: normalizeObjectId(senderId),
     recipientId: normalizeObjectId(resolvedTargetUserId)
   };

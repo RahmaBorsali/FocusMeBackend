@@ -8,6 +8,7 @@ const User = require("../models/user");
 const Friendship = require("../models/Friendship");
 const ChallengeMessage = require("../models/ChallengeMessage");
 const ChallengeInvite = require("../models/ChallengeInvite");
+const { chatUpload } = require("../middleware/upload");
 
 const router = express.Router();
 
@@ -1202,16 +1203,42 @@ router.get("/:id/messages", requireAuth, async (req, res) => {
       messages.map((message) => {
         const user = userMap.get(normalizeObjectId(message.userId));
         return {
-          id: message._id,
-          userId: message.userId,
+          id: normalizeObjectId(message._id),
+          userId: normalizeObjectId(message.userId),
           username: user ? user.username : "",
           avatarUrl: user ? user.avatarUrl || "" : "",
           text: message.text,
+          attachment: message.attachment,
           createdAt: message.createdAt
         };
       })
     );
   } catch {
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+});
+
+router.post("/:id/upload", requireAuth, chatUpload.single("file"), async (req, res) => {
+  try {
+    const lookup = await ensureChallengeExists(req.params.id);
+    if (lookup.error) return res.status(lookup.error.status).json(lookup.error.body);
+
+    const { challenge } = lookup;
+    const access = await getChallengeAccess(challenge, req.userId);
+    if (!access.isOwner && !access.isParticipant) return res.status(403).json({ error: "FORBIDDEN" });
+
+    if (!req.file) return res.status(400).json({ error: "NO_FILE_UPLOADED" });
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const fileUrl = `${baseUrl}/uploads/chat/${req.file.filename}`;
+
+    return res.json({
+      url: fileUrl,
+      type: req.file.mimetype,
+      fileName: req.file.originalname,
+      fileSize: req.file.size
+    });
+  } catch (error) {
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 });
@@ -1226,16 +1253,20 @@ router.post("/:id/messages", requireAuth, async (req, res) => {
     if (!access.isOwner && !access.isParticipant) return res.status(403).json({ error: "FORBIDDEN" });
 
     const text = clampText(req.body.text, 280);
-    if (!text) return res.status(400).json({ error: "EMPTY_MESSAGE" });
+    const attachment = req.body.attachment;
+    
+    if (!text && !attachment) return res.status(400).json({ error: "EMPTY_MESSAGE" });
 
     const message = await ChallengeMessage.create({
       challengeId: challenge._id,
       userId: req.userId,
-      text
+      text: text || null,
+      attachment: attachment || null
     });
 
-    return res.status(201).json({ id: message._id });
-  } catch {
+    return res.status(201).json({ id: normalizeObjectId(message._id) });
+  } catch (error) {
+    console.error("[Challenges] POST message error:", error);
     return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
   }
 });

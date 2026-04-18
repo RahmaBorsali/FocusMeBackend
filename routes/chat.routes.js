@@ -2,13 +2,14 @@ const express = require("express");
 
 const { requireAuth } = require("../middleware/auth");
 const {
-  ensureOrCreateConversation,
-  listConversationsForUser,
-  getConversationItem,
-  listMessagesForConversation,
   createDirectMessage,
-  markConversationAsRead
+  markConversationAsRead,
+  ensureOrCreateConversation,
+  listMessagesForConversation,
+  getConversationItem,
+  listConversationsForUser
 } = require("../services/chatService");
+const { chatUpload } = require("../middleware/upload");
 const { emitDirectMessageCreated, emitConversationRead } = require("../services/chatRealtime");
 
 const router = express.Router();
@@ -58,26 +59,38 @@ router.get("/conversations/:conversationId/messages", requireAuth, async (req, r
   }
 });
 
+router.post("/upload", requireAuth, chatUpload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "NO_FILE_UPLOADED" });
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const fileUrl = `${baseUrl}/uploads/chat/${req.file.filename}`;
+
+    return res.json({
+      url: fileUrl,
+      type: req.file.mimetype,
+      fileName: req.file.originalname,
+      fileSize: req.file.size
+    });
+  } catch (error) {
+    return handleChatError(res, error);
+  }
+});
+
 router.post("/messages", requireAuth, async (req, res) => {
   try {
-    const result = await createDirectMessage({
+    const { messageId, senderId, recipientId } = await createDirectMessage({
       senderId: req.userId,
       targetUserId: req.body.targetUserId,
       conversationId: req.body.conversationId,
-      text: req.body.text
+      text: req.body.text,
+      attachment: req.body.attachment
     });
 
-    await emitDirectMessageCreated(getIo(req), result.message._id, {
-      senderId: result.senderId,
-      recipientId: result.recipientId
-    });
+    const io = getIo(req);
+    await emitDirectMessageCreated(io, messageId, { senderId, recipientId });
 
-    const conversation = await getConversationItem(result.conversation._id, req.userId);
-    return res.status(201).json({
-      conversationId: result.conversation._id,
-      messageId: result.message._id,
-      conversation
-    });
+    return res.status(201).json({ ok: true });
   } catch (error) {
     return handleChatError(res, error);
   }

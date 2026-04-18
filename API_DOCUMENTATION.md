@@ -1,377 +1,528 @@
-# FocusMe Backend — API Documentation
+# FocusMe Backend API
 
-> **Base URL** : `http://localhost:4000`
+Base URL:
+`http://localhost:4000` en dev
 
----
+Cette version documente le socle auth/profile prêt pour production:
+- erreurs API cohérentes
+- signup/login robustes
+- Google Sign-In backend
+- module profil complet
+- garde-fous prod
 
-## 1. Modèles de données
+## 1. Contrat d'erreur API
 
-### Task
+### Erreur simple
 ```json
 {
-  "_id": "ObjectId",
-  "title": "String (requis)",
-  "isDone": "Boolean (default: false)",
-  "sessionId": "ObjectId | null",
-  "dayId": "String | null",
-  "dueDate": "Date | null",
-  "completedAt": "Date | null",
-  "postponedCount": "Number (default: 0)",
-  "createdAt": "Date",
-  "updatedAt": "Date"
+  "message": "Invalid email or password"
 }
 ```
 
-### UserStats
+### Erreur de validation
 ```json
 {
-  "_id": "ObjectId",
-  "userId": "ObjectId (ref User)",
-  "date": "String — format yyyy-MM-dd",
-  "focusMinutes": "Number (default: 0)",
-  "sessionsCount": "Number (default: 0)",
-  "tasksCompleted": "Number (default: 0)",
-  "streak": "Number (default: 0)",
-  "updatedAt": "Date"
-}
-```
-
-### User (existant)
-```json
-{
-  "_id": "ObjectId",
-  "username": "String",
-  "email": "String",
-  "avatarType": "String — 'initials' | 'image'",
-  "avatarInitials": "String",
-  "avatarUrl": "String"
-}
-```
-
-### Friendship (existant — PAS de champ status)
-```json
-{
-  "_id": "ObjectId",
-  "user1Id": "ObjectId",
-  "user2Id": "ObjectId"
-}
-```
-> L'existence d'un document Friendship = les deux users sont amis.
-
----
-
-## 2. Endpoints — Tasks
-
-### POST /api/tasks
-Créer une nouvelle tâche.
-
-**Body** :
-```json
-{
-  "title": "Réviser le chapitre 3",
-  "isDone": false,
-  "dueDate": "2026-03-15",
-  "sessionId": null,
-  "dayId": "2026-03-08"
-}
-```
-
-**Réponse** `201` :
-```json
-{
-  "_id": "661f...",
-  "title": "Réviser le chapitre 3",
-  "isDone": false,
-  "dueDate": "2026-03-15T00:00:00.000Z",
-  "postponedCount": 0,
-  "completedAt": null,
-  "createdAt": "...",
-  "updatedAt": "..."
-}
-```
-
----
-
-### PATCH /api/tasks/:taskId/complete
-Marquer une tâche comme terminée.
-
-**Paramètres** : `taskId` — ObjectId de la tâche
-
-**Réponse** `200` :
-```json
-{
-  "_id": "661f...",
-  "title": "Réviser le chapitre 3",
-  "isDone": true,
-  "completedAt": "2026-03-08T14:00:00.000Z",
-  "postponedCount": 0
-}
-```
-
-**Erreurs** :
-| Code | Signification |
-|------|--------------|
-| 400 | `INVALID_TASK_ID` — taskId mal formé |
-| 404 | `TASK_NOT_FOUND` — tâche introuvable |
-
----
-
-### PATCH /api/tasks/:taskId/postpone
-Reporter une tâche à une nouvelle date.
-
-**Body** :
-```json
-{ "newDate": "2026-03-20" }
-```
-
-**Réponse** `200` :
-```json
-{
-  "_id": "661f...",
-  "isDone": false,
-  "dueDate": "2026-03-20T00:00:00.000Z",
-  "postponedCount": 1
-}
-```
-
-**Erreurs** :
-| Code | Signification |
-|------|--------------|
-| 400 | `MISSING_NEW_DATE` — champ newDate absent |
-| 400 | `INVALID_DATE_FORMAT` — format de date invalide |
-| 400 | `DATE_IN_THE_PAST` — date antérieure à aujourd'hui |
-| 404 | `TASK_NOT_FOUND` — tâche introuvable |
-
----
-
-## 3. Endpoints — Stats
-
-### POST /api/stats/sync
-Synchronise les statistiques du jour (cumul avec `$inc`).
-
-**Body** :
-```json
-{
-  "userId": "699bf6b5...",
-  "date": "2026-03-08",
-  "focusMinutes": 45,
-  "sessionsCount": 2,
-  "tasksCompleted": 3,
-  "streak": 5
-}
-```
-> Les champs `focusMinutes`, `sessionsCount`, `tasksCompleted` sont **cumulés** à chaque appel.  
-> Le champ `streak` est **écrasé** avec la dernière valeur reçue.
-
-**Réponse** `200` :
-```json
-{
-  "_id": "...",
-  "userId": "699bf6b5...",
-  "date": "2026-03-08",
-  "focusMinutes": 45,
-  "sessionsCount": 2,
-  "tasksCompleted": 3,
-  "streak": 5,
-  "updatedAt": "2026-03-08T14:00:00.000Z"
-}
-```
-
-**Erreurs** :
-| Code | Signification |
-|------|--------------|
-| 400 | `INVALID_USER_ID` — userId manquant ou mal formé |
-| 400 | `INVALID_DATE_FORMAT` — format attendu `yyyy-MM-dd` |
-
----
-
-### GET /api/stats/friends/:userId
-Classement hebdo des amis (7 derniers jours).
-
-**Réponse** `200` :
-```json
-[
-  {
-    "userId": "699bfa74...",
-    "name": "Alice",
-    "avatarUrl": "",
-    "weeklyFocusMin": 320,
-    "tasksThisWeek": 12,
-    "streak": 7,
-    "rank": 1
-  },
-  {
-    "userId": "699c458b...",
-    "name": "Bob",
-    "avatarUrl": "",
-    "weeklyFocusMin": 180,
-    "tasksThisWeek": 5,
-    "streak": 3,
-    "rank": 2
+  "message": "Validation failed",
+  "errors": {
+    "email": ["Email must be valid"],
+    "password": [
+      "Minimum 8 characters",
+      "Au moins 1 majuscule"
+    ]
   }
-]
+}
 ```
 
----
+### Codes HTTP utilisés
+- `200` succès lecture/mise à jour/suppression
+- `201` ressource créée
+- `400` validation ou payload invalide
+- `401` authentification invalide
+- `403` action refusée
+- `404` ressource absente
+- `409` conflit de données métier
+- `429` trop de tentatives
+- `500` erreur interne
 
-## 4. Endpoints — Feed
+## 2. DTO principaux
 
-### GET /api/feed/:userId?limit=20
-Fil d'activité des amis (7 derniers jours).
-
-**Query params** :
-- `limit` (optionnel, default `20`, max `100`)
-
-**Filtres appliqués** : seuls les jours où `focusMinutes ≥ 30` OU `tasksCompleted ≥ 1` OU `streak ≥ 3` apparaissent.
-
-**Réponse** `200` :
+### `UserDto`
 ```json
-[
-  {
-    "friendId": "699bfa74...",
-    "friendName": "Alice",
+{
+  "id": "67f90e4c0c2a0d0d9b5d5f01",
+  "username": "rahma",
+  "email": "rahma@example.com",
+  "avatarType": "initials",
+  "avatarInitials": "RA",
+  "avatarUrl": "",
+  "displayName": "Rahma",
+  "studyGoal": "3 hours of focus per day",
+  "createdAt": "2026-04-15T13:05:10.114Z"
+}
+```
+
+### `LoginRequest`
+```json
+{
+  "email": "rahma@example.com",
+  "password": "StrongPass1!"
+}
+```
+
+### `SignupRequest`
+```json
+{
+  "username": "rahma",
+  "email": "rahma@example.com",
+  "password": "StrongPass1!",
+  "confirmPassword": "StrongPass1!"
+}
+```
+
+### `GoogleLoginRequest`
+```json
+{
+  "idToken": "google-id-token"
+}
+```
+
+### `LoginResponse`
+```json
+{
+  "accessToken": "jwt-token",
+  "user": {
+    "id": "67f90e4c0c2a0d0d9b5d5f01",
+    "username": "rahma",
+    "email": "rahma@example.com",
+    "avatarType": "initials",
+    "avatarInitials": "RA",
     "avatarUrl": "",
-    "actionType": "SESSION",
-    "value": 45,
-    "message": "Alice a étudié 45 min aujourd'hui 📚",
-    "timestamp": "2026-03-08T14:00:00.000Z"
-  },
-  {
-    "friendId": "699bfa74...",
-    "friendName": "Alice",
-    "avatarUrl": "",
-    "actionType": "TASKS",
-    "value": 3,
-    "message": "Alice a complété 3 tâches ✅",
-    "timestamp": "2026-03-08T14:00:00.000Z"
-  },
-  {
-    "friendId": "699c458b...",
-    "friendName": "Bob",
-    "avatarUrl": "",
-    "actionType": "STREAK",
-    "value": 5,
-    "message": "Bob est en streak de 5 jours 🔥",
-    "timestamp": "2026-03-07T10:00:00.000Z"
+    "displayName": "Rahma",
+    "studyGoal": "",
+    "createdAt": "2026-04-15T13:05:10.114Z"
   }
-]
-```
-
-**Types d'action** :
-| actionType | Seuil | Message |
-|-----------|-------|---------|
-| `SESSION` | focusMinutes ≥ 30 | `"{name} a étudié {min} min aujourd'hui 📚"` |
-| `TASKS` | tasksCompleted ≥ 1 | `"{name} a complété {n} tâche(s) ✅"` |
-| `STREAK` | streak ≥ 3 | `"{name} est en streak de {n} jours 🔥"` |
-
----
-
-## 5. Codes d'erreur globaux
-
-| Code | Cas |
-|------|-----|
-| 400 | Validation échouée (champ manquant, format invalide, date passée) |
-| 404 | Ressource introuvable |
-| 500 | Erreur serveur interne |
----
-
-## 6. Challenges
-
-### Challenge object
-```json
-{
-  "id": "ObjectId",
-  "title": "String",
-  "description": "String",
-  "creatorId": "ObjectId",
-  "startDate": "YYYY-MM-DD",
-  "endDate": "YYYY-MM-DD",
-  "visibility": "public | private | friends",
-  "status": "upcoming | ongoing | finished",
-  "participantsCount": 4,
-  "maxParticipants": 20,
-  "goal": {
-    "type": "focus_minutes | sessions_count | tasks_completed",
-    "targetValue": 300,
-    "unit": "minutes | sessions | tasks"
-  },
-  "goalMinutes": 300,
-  "joinCode": "ABCDEFGH",
-  "myJoinRequestStatus": "pending | null",
-  "myJoinRequestId": "ObjectId | null",
-  "myJoinRequestType": "join | request_access | null",
-  "createdAt": "Date",
-  "updatedAt": "Date"
 }
 ```
 
-### Join a challenge
-`POST /api/challenges/:id/join`
-
-Possible body:
+### `SignupResponse`
 ```json
 {
-  "joinCode": "ABCDEFGH",
-  "requestAccess": false
+  "message": "Account created. Please verify your email before logging in.",
+  "user": {
+    "id": "67f90e4c0c2a0d0d9b5d5f01",
+    "username": "rahma",
+    "email": "rahma@example.com",
+    "avatarType": "initials",
+    "avatarInitials": "RA",
+    "avatarUrl": "",
+    "displayName": "rahma",
+    "studyGoal": "",
+    "createdAt": "2026-04-15T13:05:10.114Z"
+  }
 }
 ```
 
-Responses:
-- Direct join:
-```json
-{ "ok": true, "joined": true, "membershipStatus": "joined" }
-```
-- Approval required:
+## 3. Endpoints Auth
+
+### `POST /auth/signup`
+Crée un compte email/password.
+
+Body:
 ```json
 {
-  "ok": true,
-  "joined": false,
-  "status": "pending_approval",
-  "membershipStatus": "pending_request",
-  "requestId": "ObjectId",
-  "requestType": "join | request_access"
+  "username": "rahma",
+  "email": "rahma@example.com",
+  "password": "StrongPass1!",
+  "confirmPassword": "StrongPass1!"
 }
 ```
 
-### Request access explicitly
-`POST /api/challenges/:id/request-access`
-
-Response:
+Réponses:
+- `201`
 ```json
 {
-  "ok": true,
-  "joined": false,
-  "status": "pending_approval",
-  "membershipStatus": "pending_request",
-  "requestId": "ObjectId",
-  "requestType": "request_access"
+  "message": "Account created. Please verify your email before logging in.",
+  "user": {
+    "id": "67f90e4c0c2a0d0d9b5d5f01",
+    "username": "rahma",
+    "email": "rahma@example.com",
+    "avatarType": "initials",
+    "avatarInitials": "RA",
+    "avatarUrl": "",
+    "displayName": "rahma",
+    "studyGoal": "",
+    "createdAt": "2026-04-15T13:05:10.114Z"
+  }
+}
+```
+- `409`
+```json
+{ "message": "Email already in use" }
+```
+- `409`
+```json
+{ "message": "Username already in use" }
+```
+- `400`
+```json
+{
+  "message": "Validation failed",
+  "errors": {
+    "password": [
+      "Minimum 8 characters",
+      "Au moins 1 majuscule",
+      "Au moins 1 caractere special"
+    ]
+  }
 }
 ```
 
-### Incoming join requests
-`GET /api/challenges/requests/incoming`
+### `POST /auth/login`
+Connexion email/password.
 
-### Outgoing join requests
-`GET /api/challenges/requests/outgoing`
-
-### Requests for one challenge
-`GET /api/challenges/:id/requests`
-
-### Accept request
-`POST /api/challenges/:id/requests/:requestId/accept`
-
-### Reject request
-`POST /api/challenges/:id/requests/:requestId/reject`
-
-### Cancel my request
-`DELETE /api/challenges/:id/my-request`
-
-### Challenge overview
-`GET /api/challenges/:id/overview`
-
-For owners, overview includes:
+Body:
 ```json
 {
-  "pendingJoinRequestsCount": 3
+  "email": "rahma@example.com",
+  "password": "StrongPass1!"
 }
 ```
+
+Réponses:
+- `200` retourne `LoginResponse`
+- `401`
+```json
+{ "message": "Invalid email or password" }
+```
+- `403`
+```json
+{ "message": "Email not verified" }
+```
+- `400`
+```json
+{
+  "message": "Validation failed",
+  "errors": {
+    "email": ["Email must be valid"]
+  }
+}
+```
+
+### `POST /auth/google`
+Connexion ou création via Google Sign-In.
+
+Body:
+```json
+{
+  "idToken": "google-id-token"
+}
+```
+
+Réponses:
+- `200` retourne `LoginResponse`
+- `401`
+```json
+{ "message": "Invalid Google token" }
+```
+- `500`
+```json
+{ "message": "Google sign-in is not configured" }
+```
+
+### `POST /auth/forgot-password`
+Body:
+```json
+{
+  "email": "rahma@example.com"
+}
+```
+
+Réponse:
+- `200`
+```json
+{
+  "message": "If this email exists, a password reset link has been sent."
+}
+```
+
+### `POST /auth/reset-password`
+Body:
+```json
+{
+  "token": "reset-token",
+  "password": "NewStrongPass1!",
+  "confirmPassword": "NewStrongPass1!"
+}
+```
+
+Réponses:
+- `200`
+```json
+{
+  "message": "Password updated successfully"
+}
+```
+- `400`
+```json
+{ "message": "Invalid or expired token" }
+```
+
+## 4. Endpoints Profile
+
+Tous les endpoints ci-dessous nécessitent:
+`Authorization: Bearer <accessToken>`
+
+### `GET /profile/me`
+Retourne le profil courant.
+
+Réponse `200`
+```json
+{
+  "id": "67f90e4c0c2a0d0d9b5d5f01",
+  "username": "rahma",
+  "email": "rahma@example.com",
+  "avatarType": "initials",
+  "avatarInitials": "RA",
+  "avatarUrl": "",
+  "displayName": "Rahma",
+  "studyGoal": "Pass 2 exams this month",
+  "createdAt": "2026-04-15T13:05:10.114Z"
+}
+```
+
+### `PATCH /profile/me`
+Permet de mettre à jour `username`, `displayName`, `studyGoal` et des métadonnées avatar.
+
+Body:
+```json
+{
+  "displayName": "Rahma B.",
+  "studyGoal": "4 focused sessions every day"
+}
+```
+
+Réponses:
+- `200`
+```json
+{
+  "message": "Profile updated successfully",
+  "user": {
+    "id": "67f90e4c0c2a0d0d9b5d5f01",
+    "username": "rahma",
+    "email": "rahma@example.com",
+    "avatarType": "initials",
+    "avatarInitials": "RB",
+    "avatarUrl": "",
+    "displayName": "Rahma B.",
+    "studyGoal": "4 focused sessions every day",
+    "createdAt": "2026-04-15T13:05:10.114Z"
+  }
+}
+```
+- `409`
+```json
+{ "message": "Username already in use" }
+```
+- `400`
+```json
+{
+  "message": "Validation failed",
+  "errors": {
+    "studyGoal": ["Study goal must be at most 280 characters"]
+  }
+}
+```
+
+### `POST /profile/avatar`
+Met à jour l’avatar sans upload binaire.
+
+Body avatar image:
+```json
+{
+  "avatarType": "image",
+  "avatarUrl": "https://cdn.example.com/avatar.png"
+}
+```
+
+Body avatar initials:
+```json
+{
+  "avatarType": "initials",
+  "avatarInitials": "RB"
+}
+```
+
+Réponse `200`
+```json
+{
+  "message": "Avatar updated successfully",
+  "user": {
+    "id": "67f90e4c0c2a0d0d9b5d5f01",
+    "username": "rahma",
+    "email": "rahma@example.com",
+    "avatarType": "image",
+    "avatarInitials": "RB",
+    "avatarUrl": "https://cdn.example.com/avatar.png",
+    "displayName": "Rahma B.",
+    "studyGoal": "4 focused sessions every day",
+    "createdAt": "2026-04-15T13:05:10.114Z"
+  }
+}
+```
+
+### `DELETE /profile/me`
+Supprime définitivement le compte et nettoie les données liées.
+
+Réponse `200`
+```json
+{
+  "message": "Account deleted successfully"
+}
+```
+
+Après suppression:
+- le user est supprimé
+- les tokens JWT existants deviennent inutilisables
+- les demandes d’amis, amitiés, tokens email/reset, tâches, sessions, stats, conversations directes et données challenge liées sont nettoyés
+
+## 5. Logique métier
+
+### Signup/Login
+- email normalisé en lowercase
+- username comparé en version normalisée insensible à la casse
+- mot de passe hashé avec `bcrypt` coût `12`
+- validation stricte via `zod`
+- mot de passe contrôlé par politique locale et vérification de fuite connue
+
+### Google Sign-In
+- le backend vérifie le `idToken` via Google
+- le token doit contenir `sub`, `email` et `email_verified = true`
+- si un user existe déjà avec ce `googleSub`, on le connecte
+- sinon si un user existe déjà avec le même email:
+  - on lie le compte existant à Google
+  - on active `authProviders.google = true`
+  - on stocke `googleSub`
+  - on conserve le même user pour éviter tout doublon email
+- sinon un nouveau compte est créé automatiquement
+- si le username dérivé du compte Google existe déjà, un username unique est généré
+
+### Profile
+- `displayName` est séparé de `username`
+- `studyGoal` est stocké côté user
+- `createdAt` vient du timestamp Mongo
+- si `username` ou `displayName` change, les initiales avatar sont recalculées si nécessaire
+
+### Delete account
+- suppression définitive du document user
+- suppression des données directement reliées
+- invalidation implicite des JWT car le middleware recharge le user à chaque requête
+- invalidation active aussi après reset password via `tokenVersion`
+
+## 6. Cas limites couverts
+
+- email inexistant au login: `401 Invalid email or password`
+- mauvais mot de passe: `401 Invalid email or password`
+- compte Google-only qui tente login email/password: `401 Invalid email or password`
+- email/password existant puis Google avec même email: liaison automatique, pas de doublon
+- token Google invalide, expiré ou audience incorrecte: `401 Invalid Google token`
+- email non vérifié au login classique: `403 Email not verified`
+- username déjà pris au signup ou patch profile: `409 Username already in use`
+- email déjà pris au signup: `409 Email already in use`
+- payload vide ou champ invalide: `400 Validation failed`
+- token JWT ancien après reset password: session expirée
+- token JWT après suppression de compte: authentification refusée
+- trop de tentatives auth: `429`
+
+## 7. Préparation production
+
+### Validation et sécurité
+- validation `zod` pour auth et profile
+- `bcrypt` pour le hash mot de passe
+- JWT signé avec `JWT_SECRET`, `JWT_EXPIRES_IN`, `JWT_ISSUER`, `JWT_AUDIENCE`
+- `tokenVersion` pour invalider les anciens JWT après reset password
+- `helmet` activé
+- `express-rate-limit` sur `/auth`, avec seuils spécifiques login/signup/google
+
+### CORS et HTTPS
+- `CORS_ORIGIN` configurable par environnement
+- `CORS_CREDENTIALS` configurable
+- `TRUST_PROXY` pour reverse proxy prod
+- `ENFORCE_HTTPS=true` pour refuser le trafic non HTTPS
+- support serveur HTTPS natif si `HTTPS_ENABLED=true` avec `HTTPS_KEY_PATH` et `HTTPS_CERT_PATH`
+
+### Logs
+- les erreurs serveur sont loggées sans exposer:
+  - `password`
+  - `confirmPassword`
+  - `token`
+  - `accessToken`
+  - `refreshToken`
+  - `idToken`
+
+## 8. Variables d’environnement
+
+Voir [` .env.example`](./.env.example)
+
+Variables clés:
+- `NODE_ENV`
+- `PORT`
+- `MONGO_URI`
+- `JWT_SECRET`
+- `JWT_EXPIRES_IN`
+- `JWT_ISSUER`
+- `JWT_AUDIENCE`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_ANDROID_CLIENT_ID`
+- `GOOGLE_WEB_CLIENT_ID`
+- `CORS_ORIGIN`
+- `CORS_CREDENTIALS`
+- `TRUST_PROXY`
+- `ENFORCE_HTTPS`
+- `HTTPS_ENABLED`
+- `HTTPS_KEY_PATH`
+- `HTTPS_CERT_PATH`
+- `AUTH_RATE_LIMIT_MAX`
+- `LOGIN_RATE_LIMIT_MAX`
+- `SIGNUP_RATE_LIMIT_MAX`
+
+## 9. Plan de migration si des users existent déjà
+
+### Étape 1
+Déployer le nouveau schéma `User` avec:
+- `usernameNormalized`
+- `displayName`
+- `studyGoal`
+- `tokenVersion`
+- `authProviders`
+- `googleSub`
+- `deletedAt`
+
+### Étape 2
+Backfill sur les users existants:
+- `usernameNormalized = username.toLowerCase().trim()`
+- `displayName = username` si vide
+- `studyGoal = ""` si absent
+- `tokenVersion = 0`
+- `authProviders.emailPassword = true` si `passwordHash` existe
+- `authProviders.google = false` si `googleSub` absent
+- `deletedAt = null`
+
+### Étape 3
+Avant de mettre l’index unique sur `usernameNormalized`, détecter et corriger les collisions de username insensibles à la casse.
+
+### Étape 4
+Configurer les client IDs Google prod/dev et tester le flow mobile avec un vrai `idToken` Android.
+
+### Étape 5
+Communiquer au frontend Android que `UserDto` inclut désormais:
+- `displayName`
+- `studyGoal`
+- `createdAt`
+
+## 10. Nouveaux endpoints ajoutés
+
+- `POST /auth/google`
+- `GET /profile/me`
+- `PATCH /profile/me`
+- `POST /profile/avatar`
+- `DELETE /profile/me`
