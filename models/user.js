@@ -20,7 +20,9 @@ const UserSchema = new mongoose.Schema(
 
     avatarType: { type: String, enum: ["initials", "image"], default: "initials" },
     avatarInitials: { type: String, default: "" },
-    avatarUrl: { type: String, default: "" }
+    avatarUrl: { type: String, default: "" },
+    
+    musicSubscriptions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MusicPack' }]
   },
   { timestamps: true }
 );

@@ -115,16 +115,19 @@ async function ensureUniqueIdentity({ email, username, excludeUserId = null }) {
 }
 
 async function sendVerificationEmail(user) {
-  const rawToken = crypto.randomBytes(32).toString("hex");
-  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+  // Générer un code à 6 chiffres
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const tokenHash = crypto.createHash("sha256").update(code).digest("hex");
+
+  // Supprimer les anciens tokens de vérification pour cet utilisateur
+  await EmailToken.deleteMany({ userId: user._id });
 
   await EmailToken.create({
     userId: user._id,
     tokenHash,
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 heures
   });
 
-  const verifyUrl = `${process.env.APP_BASE_URL}/auth/verify-email?token=${rawToken}`;
   const transport = await createTransport();
 
   await transport.sendMail({
@@ -132,10 +135,13 @@ async function sendVerificationEmail(user) {
     to: user.email,
     subject: "Verify your FocusMe email",
     html: `
-      <p>Welcome to FocusMe.</p>
-      <p>Verify your email by opening this link:</p>
-      <p><a href="${verifyUrl}">${verifyUrl}</a></p>
-      <p>This link expires in 24 hours.</p>
+      <div style="font-family: sans-serif; text-align: center; padding: 20px;">
+        <h2>Welcome to FocusMe!</h2>
+        <p>Your verification code is:</p>
+        <h1 style="color: #FF5E89; letter-spacing: 5px;">${code}</h1>
+        <p>Enter this code in the app to activate your account.</p>
+        <p>This code expires in 24 hours.</p>
+      </div>
     `
   });
 }
@@ -218,19 +224,30 @@ router.post("/signup", async (req, res, next) => {
   }
 });
 
-router.get("/verify-email", async (req, res, next) => {
+router.post("/verify-email", async (req, res, next) => {
   try {
-    const rawToken = String(req.query.token || "");
-    if (!rawToken) return res.status(400).send("Missing token");
+    const { email, token } = req.body; // 'token' est ici le code à 6 chiffres
+    
+    if (!email || !token) {
+      return res.status(400).json({ message: "Email and code are required" });
+    }
 
-    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-    const record = await EmailToken.findOne({ tokenHash });
-    if (!record) return res.status(400).send("Invalid or expired token");
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
-    await User.updateOne({ _id: record.userId }, { $set: { emailVerified: true } });
-    await EmailToken.deleteMany({ userId: record.userId });
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const record = await EmailToken.findOne({ userId: user._id, tokenHash });
+    
+    if (!record || record.expiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ message: "Invalid or expired code" });
+    }
 
-    return res.status(200).send("Email verified. You can go back to the app and log in.");
+    await User.updateOne({ _id: user._id }, { $set: { emailVerified: true } });
+    await EmailToken.deleteMany({ userId: user._id });
+
+    return res.json({ message: "Email verified successfully" });
   } catch (e) {
     next(e);
   }
@@ -341,33 +358,38 @@ router.post("/google", async (req, res, next) => {
 router.post("/forgot-password", async (req, res, next) => {
   try {
     const { email } = forgotPasswordSchema.parse(req.body);
-    const genericResponse = { message: "If this email exists, a password reset link has been sent." };
+    const genericResponse = { message: "If this email exists, a verification code has been sent." };
     const user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user || !user.passwordHash) {
       return res.status(200).json(genericResponse);
     }
 
-    const rawToken = crypto.randomBytes(32).toString("hex");
-    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    // Générer un code à 6 chiffres
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const tokenHash = crypto.createHash("sha256").update(code).digest("hex");
+
+    // Supprimer les anciens tokens pour cet utilisateur
+    await PasswordResetToken.deleteMany({ userId: user._id });
 
     await PasswordResetToken.create({
       userId: user._id,
       tokenHash,
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000)
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000) // 15 minutes
     });
 
-    const resetUrl = `${process.env.APP_BASE_URL}/auth/reset-password?token=${rawToken}`;
     const transport = await createTransport();
     await transport.sendMail({
       from: process.env.MAIL_FROM,
       to: user.email,
-      subject: "Reset your FocusMe password",
+      subject: "Your FocusMe Reset Code",
       html: `
-        <p>You asked to reset your password.</p>
-        <p>Open this link:</p>
-        <p><a href="${resetUrl}">${resetUrl}</a></p>
-        <p>This link expires in 30 minutes.</p>
+        <div style="font-family: sans-serif; text-align: center; padding: 20px;">
+          <h2>Reset password</h2>
+          <p>Use the following code to reset your password:</p>
+          <h1 style="color: #FF5E89; letter-spacing: 5px;">${code}</h1>
+          <p>This code expires in 15 minutes.</p>
+        </div>
       `
     });
 
@@ -379,21 +401,33 @@ router.post("/forgot-password", async (req, res, next) => {
 
 router.post("/reset-password", async (req, res, next) => {
   try {
-    const data = resetSchema.parse(req.body);
-    await ensurePasswordSafe(data.password);
-
-    const tokenHash = crypto.createHash("sha256").update(data.token).digest("hex");
-    const record = await PasswordResetToken.findOne({ tokenHash });
-    if (!record || record.expiresAt.getTime() < Date.now()) {
-      if (record) {
-        await PasswordResetToken.deleteOne({ _id: record._id });
-      }
-      return res.status(400).json({ message: "Invalid or expired token" });
+    const { email, token, password, confirmPassword } = req.body; // 'token' est ici le code à 6 chiffres
+    
+    if (!email || !token || !password || !confirmPassword) {
+      return res.status(400).json({ message: "All fields are required" });
     }
 
-    const passwordHash = await bcrypt.hash(data.password, 12);
+    if (password !== confirmPassword) {
+      return res.status(400).json({ message: "Passwords do not match" });
+    }
+
+    await ensurePasswordSafe(password);
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const record = await PasswordResetToken.findOne({ userId: user._id, tokenHash });
+    
+    if (!record || record.expiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ message: "Invalid or expired code" });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
     await User.updateOne(
-      { _id: record.userId },
+      { _id: user._id },
       {
         $set: {
           passwordHash,
@@ -403,7 +437,7 @@ router.post("/reset-password", async (req, res, next) => {
       }
     );
 
-    await PasswordResetToken.deleteMany({ userId: record.userId });
+    await PasswordResetToken.deleteMany({ userId: user._id });
 
     return res.json({ message: "Password updated successfully" });
   } catch (e) {

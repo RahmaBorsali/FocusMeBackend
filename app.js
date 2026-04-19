@@ -15,6 +15,7 @@ const feedRoutes     = require("./routes/feed");
 const sessionsRoutes = require("./routes/sessions");
 const challengesRoutes = require("./routes/challenges");
 const chatRoutes = require("./routes/chat.routes");
+const musicRoutes = require("./routes/music.routes");
 
 const app = express();
 
@@ -93,6 +94,7 @@ app.use("/api/feed",     feedRoutes);
 app.use("/api/sessions", sessionsRoutes);
 app.use("/api/challenges", challengesRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/music", musicRoutes);
 
 app.use(errorMiddleware);
 
